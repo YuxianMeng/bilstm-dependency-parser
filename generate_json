@@ -1,0 +1,84 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Thu May 25 09:36:26 2017
+
+@author: lenovo
+"""
+import json
+import os
+
+def generate_json(txt_dir, target_file = './dicts.json'):
+    """
+    iterate over all train examples to generate dictionaries: pos_id, arc2id,
+    id2arc, word2id, id2word, and save as a json file, which is used in data_input
+    """
+    word2id, id2word, word_num = {}, {}, 0
+    pos_id, pos_num = {}, 0
+    arc2id, id2arc, arc_num = {}, {}, 0
+    txt_paths = os.listdir(txt_dir)
+    sum_words = 0
+    for path in txt_paths:
+        txt_path = os.path.join(txt_dir, path)
+        with open(txt_path, ) as txt:
+#            pieces = []
+            lines = txt.readlines()
+    #        txt_id = lines[0]
+            for line in lines[1:]:
+                piece = line[:-1].split("\t")
+#                if piece[2] == '_': #添加上标点符号 
+#                    continue
+                pos = piece[3]; word = piece[2]
+                if pos not in pos_id:
+                    pos_id[pos] = pos_num
+                    pos_num += 1
+                if word not in word2id:
+                    word2id[word] = [word_num, 1]
+                    id2word[word_num] = word
+                    word_num += 1
+                else:
+                    word2id[word][1] += 1
+                sum_words += 1
+                for arc in piece[6:]:
+                    if arc not in arc2id:
+                        arc2id[arc] = arc_num
+                        id2arc[arc_num] = arc
+                        arc_num += 1  
+    
+    #finally replace arc '_' with arc '__ROOT__'
+    num = arc2id['_']
+    arc2id.pop('_')
+    arc2id['__ROOT__'] = num
+    id2arc[num] = '__ROOT__'
+    
+    #add '__UNKNOWN__' to word2id and id2word
+    un = '__UNKNOWN__' 
+    assert un not in word2id, 'error:should choose another symbol for unknown words'
+    word2id_freq = {}  # only store the frequence>10 words in word2id
+    id2word_freq = {}
+    num_freq = 1
+    un_freq = 0
+    for word in word2id:
+        if word2id[word][1] > 10:
+            word2id_freq[word] = [num_freq, word2id[word][1]]
+            id2word_freq[num_freq] = word
+        else:
+            un_freq += 1
+    word2id_freq[un] = [0, un_freq]
+    id2word_freq[0] = un
+                    
+    dicts = {'pos_id': pos_id, 'arc2id': arc2id, 'id2arc': id2arc, 'id2word_freq': id2word_freq,
+             'word2id': word2id, 'id2word': id2word, 'word2id_freq': word2id_freq}                      
+    json_dic = json.dumps(dicts, sort_keys=True, indent=4, separators=(',', ': '))                      
+    with open(target_file, 'w') as file:
+        file.write(json_dic)
+
+    return arc2id, pos_id, word2id
+            
+
+if __name__ == "__main__":
+#    txt = open('./data/0.txt')
+#    lines = txt.readlines()
+#    t = lines[1][:-1].split('\t')
+    txt = './data_train'
+    dic1, dic2, wd = generate_json(txt, './dicts_freq.json')    
+        
