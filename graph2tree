@@ -1,0 +1,187 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Jun 15 14:20:42 2017
+
+@author: lenovo
+"""
+import json
+from data_input import batch_input
+import copy
+
+file = open('./dicts_freq.json')
+dicts_total_arc = json.load(open('./dicts.json'))
+dicts = json.load(file)
+pos_id, id2arc, arc2id = dicts_total_arc['pos_id'], dicts_total_arc['id2arc'], dicts_total_arc['arc2id']
+word2id, id2word = dicts['word2id_freq'], dicts['id2word_freq']
+un = "__UNKNOWN__" # unknown symbol
+alpha = 0.25 # drop parameter
+
+def graph2tree(length, arcs, roots):
+    """turn a dependency graph to tree.
+    input:
+        length
+        arcs
+        roots
+    return:
+        tree_arcs
+    """
+    def find_word():
+        if roots and roots[0] in words_left:
+            words_left.remove(roots[0])
+            return roots[0]
+        elif arcs_left:
+#            print("arcs_left")
+            for arc in arcs_left:
+                words_left.remove(arc[0])
+                return arc[0]
+        else:
+            word = words_left[0]
+            words_left.remove(word)
+            return word
+    
+    words = list(range(length))
+    words_left = words
+    arcs_left = arcs.copy()
+    forest = []
+    while words_left:
+        tree_arcs = {}
+        tree_root = find_word()
+        present_visit = {tree_root, }
+        visited = present_visit.copy()
+        while True:
+            new_visit = set({})
+            arcs_left_copy = arcs_left.copy()
+            for arc in arcs_left:            
+                i, j = arc
+                if i in present_visit and j not in visited:
+#                    print('{}-->{}'.format(i, j))
+                    visited.add(j)
+                    new_visit.add(j)
+                    arcs_left_copy.pop((i, j))
+                    tree_arcs[(i,j)] = arcs[(i,j)]
+                    words_left.remove(j)
+                elif j in present_visit and i not in visited:
+#                    print('{}-->{}'.format(j, i))
+                    words_left.remove(i)
+                    visited.add(i)
+                    new_visit.add(i)
+                    arcs_left_copy.pop((i, j))
+                    tree_arcs[(j, i)] = arcs[(i,j)] + len(arc2id) - 1
+                elif i in visited and j in visited :
+                    arcs_left_copy.pop((i,j))
+            if not new_visit or arcs_left == arcs_left_copy:
+                forest.append([tree_arcs, tree_root])
+                arcs_left = arcs_left_copy.copy()
+                break
+#            print(new_visit, visited)
+#            print(arcs_left_copy)
+            present_visit = new_visit
+#    return forest
+    #paper
+    arcs_main, root_main = copy.deepcopy(forest[0])
+
+    while len(forest) > 1:
+        arcs1, root1 = forest.pop()
+        arcs0, root0 = forest[0]
+#        arcs0.update(arcs1)
+        arcs_main.update(arcs1)
+        dmin = 100
+        node = None
+#        print(arcs0)
+        if arcs0: #如果有arc
+            for i, j in arcs0:
+                if abs(i-root1) < dmin:
+                    dmin = abs(i-root1)
+                    node = i
+                if abs(j-root1) < dmin:               
+                    dmin = abs(j-root1)
+                    node = j              
+            arcs_main[(node, root1)] = 0 #add None arc
+#            print('{}--->{}'.format(node, root1))
+        else: #如果就是一个点的树
+            arcs_main[(root0, root1)] = 0
+
+    return arcs_main, root_main      
+#    return forest[0]
+     
+
+
+
+
+if __name__ == "__main__":
+    t = './data'
+    b = batch_input(t, t)
+    
+    import numpy as np
+    def stats_scores(dic_predicts, dic_trues):
+        """
+        input: 2 lists contains dicts like {(i,j):k, ...}, len(list) = batch_size
+        return: accuracies and recalls
+        """
+        total_trues = 0
+        total_predicts = 0
+        true_positive_label = 0
+        true_positive_arc = 0
+        for i in range(len(dic_predicts)):
+            for key in dic_predicts[i]:
+                if key in dic_trues[i]:
+                    true_positive_arc += 1
+                    if dic_predicts[i][key] == dic_trues[i][key]:
+                        true_positive_label += 1
+            total_trues += len(dic_trues[i])
+            total_predicts += len(dic_predicts[i])
+            
+        accuracy_label = true_positive_label / (total_predicts+1)
+        accuracy_arc = true_positive_arc / (total_predicts+1)  #+1 to smooth
+        recall_label = true_positive_label / total_trues
+        recall_arc = true_positive_arc / total_trues
+        return np.array([accuracy_label, accuracy_arc, recall_label, recall_arc])
+    
+#    arcs = {(8, 9): 20, (7, 6): 2, (2, 3): 20, (10, 11): 5, (1, 0): 2, (3, 4): 2, (6, 1): 2, (1, 4): 5}
+#    print(arcs)
+#    forest = graph2tree(22, arcs, [1])
+#    arcs_tree, root = graph2tree(22, arcs, [1])
+#    gold = [-1 for _ in range(22+1)] #golden output
+#    for arc in arcs_tree:
+#        h, m = arc
+#        gold[m+1] = h+1
+#    gold[root+1] = 0
+#    print(arcs_tree, gold)   
+    
+#    
+#    
+###    forest = graph2tree(10, arcs, [0])
+#    total = 0 
+#    tree_contains = 0      
+    for _ in range(1):
+        t = b.next_batch(train = False, batch_size = 64)
+        true_arcs = [item[1] for item in t]
+
+        arcs_predicts = []
+        for data in t:
+            input_seqs, arcs_dic, puncs, roots = data
+            arcs_tree, root = graph2tree(input_seqs.shape[0]//2, arcs_dic, roots)
+            arcs_predict = {}
+            for arc in arcs_tree:
+                i,j = arc
+                label = arcs_tree[arc]
+                if label > len(arc2id)-1:
+                    label -= (len(arc2id)-1)
+                    j,i=i,j
+                if label:
+                    arcs_predict[(i,j)] = label
+            arcs_predicts.append(arcs_predict)
+#        print(arcs_predicts)
+#        print(true_arcs)
+        print(stats_scores(arcs_predicts, true_arcs))
+#        for arc in arcs_tree:
+#            if arcs_tree[arc] != 0:
+#                tree_contains += 1
+#    print(total, tree_contains)
+#        gold = [-1 for _ in range(length+1)] #golden output
+#        for arc in arcs_tree:
+#            h, m = arc
+#            gold[m+1] = h+1
+#        gold[root+1] = 0
+#        assert -1 not in gold[1:], 'error'
+#        print(arcs, arcs_tree, gold)
