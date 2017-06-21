@@ -1,0 +1,113 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Thu May 25 15:37:35 2017
+
+@author: lenovo
+"""
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+
+import json
+import os
+import numpy as np
+from random import random
+
+file = open('./dicts_freq.json')
+dicts_total_arc = json.load(open('./dicts.json'))
+dicts = json.load(file)
+pos_id, id2arc, arc2id = dicts_total_arc['pos_id'], dicts_total_arc['id2arc'], dicts_total_arc['arc2id']
+word2id, id2word = dicts['word2id_freq'], dicts['id2word_freq']
+un = "__UNKNOWN__" # unknown symbol
+alpha = 0.25 # drop parameter
+
+def read(txt_file, drop = False):
+    """
+    input: txtfile
+    output: pos_ids and arcs #TODO: output ROOT
+    """    
+    with open(txt_file) as txt:
+        lines = txt.readlines()
+#        txt_id = lines[0]
+        punctuations = []
+        roots = []
+        pieces = []
+        for line in lines[1:]:
+            piece = line[:-2].split('\t') #服务器上是-2, 本机-1
+#            if piece[2] == '_': #加入标点符号，因为是蕴含断句信息的.  
+            pieces.append(piece)
+        pos_ids = [pos_id[piece[3]] for piece in pieces]
+        word_ids = []
+        for piece in pieces:
+            if piece[2] in word2id and random() > alpha/(word2id[piece[2]][1]+alpha): #word drop
+                word_ids.append(word2id[piece[2]][0])
+            else:
+                word_ids.append(word2id[un][0])
+        arcs = {}
+        c = 1 #count number of '+' in column 5
+        for i in range(len(pieces)):
+            if pieces[i][2] == '_':
+                punctuations.append(i)
+#                print(piece)
+            if pieces[i][4] == '+': #TODO:
+#                arcs.add((-1, i), arc2id['__ROOT__']))
+                roots.append(i)
+            if pieces[i][5] == '+':
+                j = 5+c
+                for k in range(len(pieces)):
+                    sign = pieces[k][j]
+                    if sign != '_':
+                        arcs[(i, k)] = arc2id[sign] # word_i --> word_k 
+                c += 1
+    return pos_ids + word_ids, arcs, punctuations, roots
+
+class batch_input():
+    
+    def __init__(self, train_dir, eval_dir):
+        self.dirs = [train_dir, eval_dir]
+        self.ls = [len(os.listdir(train_dir)), len(os.listdir(eval_dir))]
+        self.files = [os.listdir(train_dir), os.listdir(eval_dir)]
+        self.permutations = [np.random.permutation(self.ls[i]) for i in range(2)]
+        self.indexs = [0, 0]
+        
+    def next_batch(self, batch_size = 1, train = True, drop = False):
+        i = 0 if train else 1
+        batch_data = []
+        for batch in range(batch_size):
+            data = [np.array([1,2]), {}]
+            while data[0].shape[0] == 2: #如果只有一个word，就没有训练的必要了
+                data = list(read(os.path.join(self.dirs[i], self.files[i][self.permutations[i][self.indexs[i]]]), drop))
+                data[0] = np.array(data[0])
+                self.indexs[i] += 1
+                if self.indexs[i] >= self.ls[i]:
+                    self.indexs[i] = 0
+                    self.permutations[i] = np.random.permutation(self.ls[i])
+            batch_data.append(data)
+        return batch_data
+    
+
+
+
+if __name__ == "__main__":
+    frequences = np.zeros((2*len(arc2id)-1,))            
+    t = './data'
+    b = batch_input(t, './data_eval')
+    t = b.next_batch(train = False)
+    x = t[0][0]
+    l = x.shape[0]
+    w = x[l//2:]
+    print(3697 in w)
+#    while b.indexs[1] != 0:
+#        t = b.next_batch(train = False)
+#        seq, arcs = t[0]
+#        N = seq.shape[0]
+#        frequences[0] += (N*(N-1)/2 - len(arcs))
+#        for key in arcs:
+#            if key[0] > key[1]:
+#                frequences[arcs[key]] += 1
+#            else:
+#                frequences[len(arc2id)+arcs[key]-1] += 1
+        
+                      
+    
